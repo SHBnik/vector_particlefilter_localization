@@ -11,29 +11,67 @@ from sensor_msgs.msg import Range
 from geometry_msgs.msg import Twist
 from std_srvs.srv import Empty
 
-x = 0.0
-y = 0.0 
-theta = 0.0
+
+
+#+++++++++++++++++++++ init vars ++++++++++++++++++++
 
 x = 0.0
 y = 0.0 
 theta = 0.0
-
-PI = 3.1415926535897
  
  
 last_x=0
 last_y=0
 
 get_last_loc_flag = True
-input_state = True
+random_move_state = True
 yaw_setpoint = 0
 r_setpoint = 0
 r_max_p_term = 0.3
 
-def callback(msg):
-    print(msg.range)
+map_address = ''
+
+laser_data = 0
+new_laser_data_flag = False
+
+distance_threshold = 0.26
+
+particle_number = 5000
+#------------------------------------------------------
+
+
+
+#+++++++++++++++++++++ functions +++++++++++++++++++++++
+
+def calculate_normal_pdf(d,z,variance):
+    #   we want to calculate p(z|d)
+    #   d is numpy array
+    p = np.array([])
+    for dist in d:
+        #   by dividing the pdf by it max we gonna map it between 0 to 1
+        p = np.append(p, math.exp((-0.5) * (((z-dist)/variance)**2.0)))
     
+    return p
+
+#-------------------------------------------------------
+
+
+
+
+#+++++++++++ read vector laser ranger finder +++++++++++
+
+def laser_reader(msg):
+    global new_laser_data_flag,laser_data
+
+    new_laser_data_flag = True
+    laser_data = msg.range
+
+#------------------------------------------------------
+ 
+
+
+#++++++++++++ read new pose from the gazebo world +++++++
+
 def new_odometry(msg):
     global x
     global y
@@ -45,95 +83,168 @@ def new_odometry(msg):
     rot_q = msg.pose.pose.orientation
     (roll, pitch, theta) = euler_from_quaternion([rot_q.x, rot_q.y, rot_q.z, rot_q.w])
 
+#------------------------------------------------------
+
+
+
+#++++++++++++++++++ ROS init ++++++++++++++++++++++++++
+
 rospy.init_node("particle_filter")
 
 sub = rospy.Subscriber("/odom", Odometry, new_odometry)
 pub = rospy.Publisher('/vector/cmd_vel', Twist, queue_size = 1)
-laser = rospy.Subscriber('/vector/laser', Range, callback)
+laser = rospy.Subscriber('/vector/laser', Range, laser_reader, queue_size = 1)
 speed = Twist()
 
+#------------------------------------------------------
+
+
+
+#+++++++++++++++++++++ MAP ++++++++++++++++++++++++++++++
+'''
+TODO: add map_reader code to read the world file 
+'''
 landmarks = np.array([ [0.5, 0.5], [0.5, -0.5], [-0.5, 0.5], [-0.5, -0.5], [0.5, 0]  ])
-number = 1000
 
-particles = np.empty((number, 2))
-particles[:, 0] = uniform(-1, 1, size=number)
-particles[:, 1] = uniform(-1, 1, size=number)
+#--------------------------------------------------------
 
-weights = np.array([1.0]*number)/number
+#+++++++++++++++++ init particles +++++++++++++++++++++++
+particles = np.empty((particle_number, 3))
+particles[:, 0] = uniform(-1, 1, size=particle_number)
+particles[:, 1] = uniform(-1, 1, size=particle_number)
+particles[:, 2] = random.choice([-90,90,180,0], size=particle_number)
 
-r = rospy.Rate(50) #50 Hz
+weights = np.array([1.0]*particle_number)/particle_number
+#---------------------------------------------------------
 
 while not rospy.is_shutdown():
-    if input_state :
-        time.sleep(2)
+    
+    if random_move_state :
 
-        yaw_setpoint = random.randrange(0, 180)
-        r_setpoint = random.randrange(0, 100) / 100.0
+        time.sleep(2)
+        
+        #   choose a random move for vector 
+        yaw_setpoint = random.choice([-90,90,180,0])
+        r_setpoint = random.choice([0.2,0.3,0.5])
+
+        #   calculate the R and YAW
         if math.sqrt(x**2 + y**2) + r_setpoint >= 1 :
             r_setpoint = 1 - math.sqrt(x**2 + y**2)
-        yaw_setpoint = yaw_setpoint * PI / 180
+        yaw_setpoint = yaw_setpoint * math.pi / 180
         
         print(r_setpoint, yaw_setpoint)
-        input_state = False
+        random_move_state = False
         
-        # predict particles
-        E_rot = np.random.normal(0.9957*yaw_setpoint + 0.0768, 0.0005, number)
-        E_trans = np.random.normal(0.1021, 0.0015, number)
-        t = E_rot + E_trans
-        t = t * PI / 180
-        
-        E_trans = np.random.normal(0.99*r_setpoint + 0.0034, 0.0027, number)
-        E_rot = np.random.normal(0.0125, 0.0007, number)
-        dist = E_trans + E_rot
 
-        particles[:, 0] += np.cos(t) * dist
-        particles[:, 1] += np.sin(t) * dist
-        
     else:
+        #++++++++++++++++++ move robot in gazebo ++++++++++++++++
+        #   calculte the yaw error
         yaw_error = yaw_setpoint - theta
+        # move yaw
         speed.angular.z = yaw_error * 10
         if yaw_error < 0.01 and yaw_error > -0.01:
             
-            if get_last_loc_flag :
-                last_x = x
-                last_y = y
-                get_last_loc_flag = False
-            r_error = r_setpoint - math.sqrt((x-last_x)**2 + (y-last_y)**2)
-            r_p_term = r_error * 2
-            if r_p_term > r_max_p_term :   
-                r_p_term = r_max_p_term
-            speed.linear.x = r_p_term
-            if r_error < 0.001 and r_error > -0.001:
-                speed.linear.x = 0
-                get_last_loc_flag = True
-                input_state = True
-                
-                    # sensor update
-                
-                # resample
-                # 5 roulette wheel
-                wheel_sum = np.sum(weights)
-                pointers = np.random.rand(5) * wheel_sum
-                cum_wheel = np.cumsum(weights)
-                indexes = np.zeros((number, 1))
-                i = 0
-                while i < number:
-                    for j in range(5):
-                        indexes[i] = np.where(pointers[j] <= cum_wheel)[0][0]
-                        i += 1
-                    pointers +=  np.random.rand(5) * wheel_sum
-                    pointers[np.where(pointers > wheel_sum)[0]] -= wheel_sum
-                indexes = np.ravel(indexes)
-                indexes = indexes.astype(int)
-                particles[:] = particles[indexes]
-                weights = weights[indexes]
-                weights /= np.sum(weights)
-                
-                print("done!", x, theta)
+            #   stop the rotation
+            speed.angular.z = 0
+            pub.publish(speed)
+
+            # wait for new laser data
+            new_laser_data_flag = False 
+            while not new_laser_data_flag:pass
+            last_laser_data = laser_data
+
+            # validate the distance to wall if less than the threshold dont apply the transistion
+            if last_laser_data > distance_threshold:
+                # save teh first place location 
+                if get_last_loc_flag :
+                    last_x = x
+                    last_y = y
+                    get_last_loc_flag = False
+                # calculate the transition error 
+                r_error = r_setpoint - math.sqrt((x-last_x)**2 + (y-last_y)**2)
+                r_p_term = r_error * 2
+                # limit the transition speed 
+                if r_p_term > r_max_p_term :   
+                    r_p_term = r_max_p_term
+                # move linear
+                speed.linear.x = r_p_term
+                if r_error < 0.001 and r_error > -0.001:
+                    speed.linear.x = 0
+                    get_last_loc_flag = True
+            
+            # prepare for move randomly again 
+            random_move_state = True
+            
+            #------------------------------------------------------------
+
+            #++++++++++++++++++++ predict (move) particles ++++++++++++++
+            e_rot_in_rot = np.random.normal(0.9957*yaw_setpoint + 0.0768, 0.0005, particle_number)
+            e_trans_in_rot = np.random.normal(0.1021, 0.0015, particle_number)
+            total_rotation = e_rot_in_rot + e_trans_in_rot
+            
+            total_transition = 0
+            if last_laser_data > distance_threshold:
+                e_trans_in_trans = np.random.normal(0.99*r_setpoint + 0.0034, 0.0027, particle_number)
+                e_rot_in_trans = np.random.normal(0.0125, 0.0007, particle_number)
+                total_transition = e_trans_in_trans + e_rot_in_trans
+
+            particles[:, 0] += np.cos(total_rotation) * total_transition
+            particles[:, 1] += np.sin(total_rotation) * total_transition
+            particles[:, 2] = total_rotation
+
+            #------------------------------------------------------------
+
+
+
+
+            #++++++++++++++++++++ sensor update ++++++++++++++++++++++++++
+
+            #   calculate the distance of particles and wall in the map
+            '''
+            TODO: shahab find the formula im tired now for that :)
+            '''
+            particles_distance = 0
+            #   sensor model is a normal distribution [mean,var]
+            #   mean is the distance that particles read 
+            #   var is 0.000097
+            weights = calculate_normal_pdf(particles_distance , laser_data , 0.000097)
+
+            #-------------------------------------------------------------    
+            
+            
+
+            #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
+            '''
+            TODO: what should we do here?!
+            '''
+            #--------------------------------------------------------------
+
+
+            
+            #+++++++++++++++++++ roulette wheel ++++++++++++++++++++++++++
+            '''
+            TODO : nastaran add comment on this part
+            '''
+            wheel_sum = np.sum(weights)
+            pointers = np.random.rand(5) * wheel_sum
+            cum_wheel = np.cumsum(weights)
+            indexes = np.zeros((particle_number, 1))
+            i = 0
+            while i < particle_number:
+                for j in range(5):
+                    indexes[i] = np.where(pointers[j] <= cum_wheel)[0][0]
+                    i += 1
+                pointers +=  np.random.rand(5) * wheel_sum
+                pointers[np.where(pointers > wheel_sum)[0]] -= wheel_sum
+            indexes = np.ravel(indexes)
+            indexes = indexes.astype(int)
+            particles[:] = particles[indexes]
+            weights = weights[indexes]
+            weights /= np.sum(weights)
+            #--------------------------------------------------------------
             
             
  
         pub.publish(speed)
 
 
-    r.sleep()
