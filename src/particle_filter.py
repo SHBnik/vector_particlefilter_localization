@@ -10,7 +10,7 @@ from tf.transformations import euler_from_quaternion
 from sensor_msgs.msg import Range
 from geometry_msgs.msg import Twist
 from std_srvs.srv import Empty
-
+import scipy.stats as stats
 
 
 #+++++++++++++++++++++ init vars ++++++++++++++++++++
@@ -40,25 +40,9 @@ particle_number = 5000
 
 x_limit = 1
 y_limit = 1
+
+laser_range = 0.04
 #------------------------------------------------------
-
-
-
-#+++++++++++++++++++++ functions +++++++++++++++++++++++
-
-def calculate_normal_pdf(d,z,variance):
-    #   we want to calculate p(z|d)
-    #   d is numpy array
-    p = np.array([])
-    for dist in d:
-        #   by dividing the pdf by it max we gonna map it between 0 to 1
-        p = np.append(p, math.exp((-0.5) * (((z-dist)/variance)**2.0)))
-    
-    return p
-
-#-------------------------------------------------------
-
-
 
 
 #+++++++++++ read vector laser ranger finder +++++++++++
@@ -131,7 +115,7 @@ while not rospy.is_shutdown():
         #   choose a random move for vector 
         #   which is acceptable for map
         '''
-            TODO: Nastaran, add landmark collision.
+            TODO: Nastaran, add landmark collision avoidance.
         '''
         while (abs(x + r_setpoint*math.cos(yaw_setpoint)) >= x_limit \
                or abs(y + r_setpoint*math.sin(yaw_setpoint)) >= y_limit):
@@ -203,15 +187,23 @@ while not rospy.is_shutdown():
             
                     #++++++++++++++++++++ sensor update ++++++++++++++++++++++++++
 
-                    #   calculate the distance of particles and wall in the map
-                    '''
-                    TODO: shahab find the formula im tired now for that :)
-                    '''
-                    particles_distance = 0
-                    #   sensor model is a normal distribution [mean,var]
-                    #   mean is the distance that particles read 
-                    #   var is 0.000097
-                    weights = calculate_normal_pdf(particles_distance , laser_data , 0.000097)
+                    # check if sensor is seeing landmarks or not
+                    if last_laser_data < laser_range:
+                        weigths.fill(1.0)
+                        # distance of landmarks and robot
+                        landmark_distance = np.power((landmarks[:, 0] - x)**2 + (landmarks[:, 1] - y)**2, 0.5)
+                        # just update particles with about same direct of robot
+                        # with 5 degree error
+                        indexes = np.where(abs(particles[:, 2] - theta*180 / math.pi ) <= 5)
+                        for i in range(len(landmarks)):
+                            # distance of landmarks and particles
+                            particles_distance = np.power((particles[indexes, 0] - landmarks[i][0])**2 + \
+                                                          (particles[indexes, 1] - landmarks[i][1])**2, 0.5)
+
+                            #   sensor model is a normal distribution [mean,var]
+                            #   mean is the distance that particles read 
+                            #   var is 0.000097
+                            weights[indexes] *= stats.norm(particles_distance, 0.000097).pdf(landmark_distance[i])
                     #-------------------------------------------------------------    
 
                     #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
