@@ -6,7 +6,7 @@ import math
 
 
 
-def init_map(address)
+def init_map(address):
 
     tree = ET.parse(address)
     root = tree.getroot()
