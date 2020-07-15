@@ -1,5 +1,4 @@
 import xml.etree.ElementTree as ET
-# import matplotlib.pyplot as plt
 # import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import math
@@ -102,17 +101,17 @@ def intersection(p1,p2,p3,p4):
     else:
         return False
 
-
 def convert_point_to_line(rects):
     lines = []
     for points in rects:
-        lines.append(np.array([ points[0] , points[1]] ))
-        lines.append(np.array([ points[1] , points[3]] ))
-        lines.append(np.array([ points[3] , points[2]] ))
-        lines.append(np.array([ points[2] , points[0]] ))
+        lines.append([ points[0] , points[1]] )
+        lines.append([ points[1] , points[3]] )
+        lines.append([ points[3] , points[2]] )
+        lines.append([ points[2] , points[0]] )
     return lines
 
-def plot_map(lines):
-    for rect in all_map_lines:
-        plt.plot(rect[:, 0], rect[:, 1], c='black')
-    plt.show()
+def plot_map(rects):
+    for rect in rects:
+        rect = list(zip(*rect))
+        plt.plot(rect[0], rect[1], c='black')
+
