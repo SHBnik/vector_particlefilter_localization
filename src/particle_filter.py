@@ -46,8 +46,10 @@ y_limit = 1
 
 laser_range = 0.04
 
+loop_iter = 0
+
 home = expanduser("~")
-map_address = home + '/catkin_ws/src/anki_description/world/sample2.world'
+map_address = home + '/catkin_ws/src/anki_description/world/sample4.world'
 #------------------------------------------------------
 
 
@@ -95,18 +97,19 @@ speed = Twist()
 
 #+++++++++++++++++++++ MAP ++++++++++++++++++++++++++++++
 #   convert the 3d map to 2d map and get all points of every rectangle
-rects = map.init_map(map_address)
+rects,global_map_pose = map.init_map(map_address)
 #   get the lines of every rectangle line defined by [start_point , end_point]
 all_map_lines = map.convert_point_to_line(rects)
-
+#   the center position of the map [x,y]
+global_map_position = [float(global_map_pose[0]),float(global_map_pose[1])]
+all_map_lines = map.add_offset(all_map_lines,global_map_position)
 map.plot_map(all_map_lines)
-
 #--------------------------------------------------------
 
 #+++++++++++++++++ init particles +++++++++++++++++++++++
 particles = np.empty((particle_number, 3))
-particles[:, 0] = uniform(-0.5, 0.5, size=particle_number)
-particles[:, 1] = uniform(-0.5, 0.5, size=particle_number)
+particles[:, 0] = uniform(-0.5, 0.5, size=particle_number) + global_map_position[0]
+particles[:, 1] = uniform(-0.5, 0.5, size=particle_number) + global_map_position[1]
 particles[:, 2] = np.random.choice([-90,90,180,0], size=particle_number)
 
 weights = np.array([1.0]*particle_number)/particle_number
@@ -128,48 +131,65 @@ while not rospy.is_shutdown():
         yaw_setpoint = yaw_setpoint * math.pi / 180
         
         random_move_state = False
+        loop_iter = 0
+
+        robot_movment_complite_flag = False        
 
     else:
         #++++++++++++++++++ move robot in gazebo ++++++++++++++++
-        #   calculte the yaw error
-        yaw_error = yaw_setpoint - theta
-        # move yaw
-        speed.angular.z = yaw_error * 10
-        if yaw_error < 0.01 and yaw_error > -0.01:
-            
-            #   stop the rotation
-            speed.angular.z = 0
-            pub.publish(speed)
+        #   if the robot still moving just do this part
+        
+        if not robot_movment_complite_flag:
+            #   calculte the yaw error
+            yaw_error = yaw_setpoint - theta
+            # move yaw
+            speed.angular.z = yaw_error * 10
+            if yaw_error < 0.01 and yaw_error > -0.01:
+                
+                #   stop the rotation
+                speed.angular.z = 0
+                pub.publish(speed)
 
-            # wait for new laser data
-            new_laser_data_flag = False 
-            while not new_laser_data_flag:pass
-            last_laser_data = laser_data
-            
-            # validate the distance to wall if less than the threshold dont apply the transistion
-            if last_laser_data > distance_threshold:
-                # save the first place location 
-                if get_last_loc_flag :
-                    last_x = x
-                    last_y = y
-                    get_last_loc_flag = False
-                # calculate the transition error 
-                r_error = r_setpoint - math.sqrt((x-last_x)**2 + (y-last_y)**2)
-                r_p_term = r_error * 2
-                # limit the transition speed 
-                if r_p_term > r_max_p_term :   
-                    r_p_term = r_max_p_term
-                # move linear
-                speed.linear.x = r_p_term
-                if r_error < 0.001 and r_error > -0.001:
+                #   just do it once
+                loop_iter += 1
+                if loop_iter == 1:
+                    # wait for new laser data
+                    new_laser_data_flag = False 
+                    while not new_laser_data_flag:pass
+                    last_laser_data = laser_data
+                
+                    print('laser data after the rotation of vector',last_laser_data)
+                
+                # validate the distance to wall if less than the threshold dont apply the transistion
+                if last_laser_data > distance_threshold:
+                    # save the first place location 
+                    if get_last_loc_flag :
+                        last_x = x
+                        last_y = y
+                        get_last_loc_flag = False
+                    # calculate the transition error 
+                    r_error = r_setpoint - math.sqrt((x-last_x)**2 + (y-last_y)**2)
+                    r_p_term = r_error * 2
+                    # limit the transition speed 
+                    if r_p_term > r_max_p_term :   
+                        r_p_term = r_max_p_term
+                    # move linear
+                    speed.linear.x = r_p_term
+                    if r_error < 0.001 and r_error > -0.001:
 
-                    speed.linear.x = 0
-                    pub.publish(speed)
-
-                    get_last_loc_flag = True
+                        speed.linear.x = 0
+                        pub.publish(speed)
+                        get_last_loc_flag = True
+                        robot_movment_complite_flag = True
+                
+                else:
+                    robot_movment_complite_flag = True
                     
-                    #------------------------------------------------------------
-            #++++++++++++++++++++ predict (move) particles ++++++++++++++
+        #------------------------------------------------------------
+        #++++++++++++++++++++ predict (move) particles ++++++++++++++
+        #   if the robot in gazebo stoped then do rest of things
+        else:
+
             e_rot_in_rot = np.random.normal(0.9957*yaw_setpoint + 0.0768, 0.0005, particle_number)
             e_trans_in_rot = np.random.normal(0.1021, 0.0015, particle_number)
             total_rotation = e_rot_in_rot + e_trans_in_rot
@@ -182,11 +202,8 @@ while not rospy.is_shutdown():
 
             particles[:, 0] += np.cos(total_rotation) * total_transition
             particles[:, 1] += np.sin(total_rotation) * total_transition
-            particles[:, 2] += total_rotation
-            #------------------------------------------------------------
-
-            # prepare for move randomly again 
-            random_move_state = True
+            particles[:, 2] += total_rotation  ##### TODO: shahab check this 
+            #-------------------------------------------------------------
 
             #++++++++++++++++++++ sensor update ++++++++++++++++++++++++++
             weights = np.array([0.0001]*particle_number)
@@ -205,31 +222,39 @@ while not rospy.is_shutdown():
                     [ 0.4*math.cos(particles[i][2]*math.pi/180)+particles[i][0] , \
                     0.4*math.sin(particles[i][2]*math.pi/180)+particles[i][1] ] ]
                 
-                min_distance = -10
-                collission_line = False
+                min_distance = 10
+                collission_point = False
                 
                 for line in all_map_lines:
                     #   calculate the intersection point
                     intersection_point = map.intersection(line[0], line[1] , sensor_line[0], sensor_line[1])
 
                     #   check for the existance of intersection point 
-                    if intersection_point :
+                    if intersection_point != False:
                         #   calculate the distance of intersection point and particle position
                         distance = (particles[i][0]-intersection_point[0])**2 + (particles[i][1]-intersection_point[1])**2 
                         if min_distance >= distance:
                             min_distance = distance
-                            collission_line = line
+                            collission_point = intersection_point
                         
-                print(collission_line)
-                if collission_line:
-                    #   particle sensor line [ start_point , end_point ]
-                    particle_sensor_line = [ [ particles[i][0] , particles[i][1] ], collission_line ]
+                print(collission_point)
 
-                    #   sensor model is a normal distribution [mean,var]
-                    #   mean is the distance that particles read 
-                    #   var is 0.000097
-                    weights[i] += stats.norm(min_distance, 0.000097).pdf(last_laser_data)
+                #   sensor hit situation
+                if collission_point != False:
+                    #   particle sensor line [ start_point , end_point ]
+                    particle_sensor_line = [ [ particles[i][0] , particles[i][1] ], collission_point ]
+                #   sensor max situation
+                else:
+                    #   the sensor line is the full lenth sensor line (0.4)
+                    particle_sensor_line = sensor_line
+                    min_distance = 0.4
+
+                #   sensor model is a normal distribution [mean,var]
+                #   mean is the distance that particles read 
+                #   var is 0.000097
+                weights[i] += stats.norm(min_distance, 0.000097).pdf(last_laser_data)
                 
+            #   plotting every particle position and orientation
             for particle in particles:
                 plt.arrow(particle[0], particle[1], 0.00001*math.cos(particle[2]), \
                     0.00001*math.sin(particle[2]), head_width = 0.02, fill=False, overhang = 0.6)
@@ -262,6 +287,9 @@ while not rospy.is_shutdown():
             particles[:] = particles[indexes]
             weights = weights[indexes]
             #--------------------------------------------------------------
+            
+            # prepare for move randomly again 
+            random_move_state = True
 
             
  
