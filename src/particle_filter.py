@@ -119,31 +119,15 @@ while not rospy.is_shutdown():
         yaw_setpoint = 0
         #   choose a random move for vector 
         #   which is acceptable for map
-        '''
-            TODO: Nastaran, add landmark collision avoidance.
+
         '''
         while (abs(x + r_setpoint*math.cos(yaw_setpoint)) >= x_limit \
                or abs(y + r_setpoint*math.sin(yaw_setpoint)) >= y_limit):
             yaw_setpoint = random.choice([-90,90,180,0])
             r_setpoint = random.choice([0.2,0.3,0.5])
+        '''
 
         yaw_setpoint = yaw_setpoint * math.pi / 180
-        
-        #------------------------------------------------------------
-        #++++++++++++++++++++ predict (move) particles ++++++++++++++
-        e_rot_in_rot = np.random.normal(0.9957*yaw_setpoint + 0.0768, 0.0005, particle_number)
-        e_trans_in_rot = np.random.normal(0.1021, 0.0015, particle_number)
-        total_rotation = e_rot_in_rot + e_trans_in_rot
-
-        total_transition = 0
-        e_trans_in_trans = np.random.normal(0.99*r_setpoint + 0.0034, 0.0027, particle_number)
-        e_rot_in_trans = np.random.normal(0.0125, 0.0007, particle_number)
-        total_transition = e_trans_in_trans + e_rot_in_trans
-
-        particles[:, 0] += np.cos(total_rotation) * total_transition
-        particles[:, 1] += np.sin(total_rotation) * total_transition
-        particles[:, 2] = total_rotation
-        #------------------------------------------------------------
         
         print(r_setpoint, yaw_setpoint)
         random_move_state = False
@@ -165,10 +149,6 @@ while not rospy.is_shutdown():
             while not new_laser_data_flag:pass
             last_laser_data = laser_data
             
-            """
-            I ignore wall collision in choosing random move part with while command
-            So I think this if condition is not necessary.
-            """
             # validate the distance to wall if less than the threshold dont apply the transistion
             if last_laser_data > distance_threshold:
                 # save the first place location 
@@ -190,84 +170,102 @@ while not rospy.is_shutdown():
                     pub.publish(speed)
 
                     get_last_loc_flag = True
-                    # prepare for move randomly again 
-                    random_move_state = True
-            
-                    #++++++++++++++++++++ sensor update ++++++++++++++++++++++++++
                     
-                    # wait for new laser data
-                    new_laser_data_flag = False 
-                    while not new_laser_data_flag:pass
-                    last_laser_data = laser_data
+                    #------------------------------------------------------------
+            #++++++++++++++++++++ predict (move) particles ++++++++++++++
+            e_rot_in_rot = np.random.normal(0.9957*yaw_setpoint + 0.0768, 0.0005, particle_number)
+            e_trans_in_rot = np.random.normal(0.1021, 0.0015, particle_number)
+            total_rotation = e_rot_in_rot + e_trans_in_rot
 
-                    #   do for all particles
-                    for index , particle in enumerate(particles):
-                        
-                        #   calculate the start and the end of sensor line (the lenth is 0.4)
-                        #   [start_point , end_point]
-                        sensor_line = [ [particle[0],particle[1]] , \
-                            [ 0.4*math.cos(particle[2]*math.pi/180)+particle[0] , \
-                                0.4*math.sin(particle[2]*math.pi/180)+particle[1] ] ]
+            total_transition = 0
+            if last_laser_data > distance_threshold:
+                e_trans_in_trans = np.random.normal(0.99*r_setpoint + 0.0034, 0.0027, particle_number)
+                e_rot_in_trans = np.random.normal(0.0125, 0.0007, particle_number)
+                total_transition = e_trans_in_trans + e_rot_in_trans
 
-                        #   distance of particle to all walls that faces it
-                        particle_distance_to_walls = [] 
-                        #   the  intersection point to all those walls
-                        intersection_points = []
+            particles[:, 0] += np.cos(total_rotation) * total_transition
+            particles[:, 1] += np.sin(total_rotation) * total_transition
+            particles[:, 2] = total_rotation
+            #------------------------------------------------------------
 
-                        for line in all_map_lines:
-                            
-                            #   calculate the intersection point 
-                            intersection_point = map.intersection(line[0],line[1] , sensor_line[0],sensor_line[1])
-                            
-                            #   check for the existance of intersection point 
-                            if intersection_point :
-                                #   calculate the distance of intersection point and particle position
-                                particle_distance_to_walls.append( \
-                                    math.sqrt( (particle[0]-intersection_point[0])**2 + (particle[1]-intersection_point[1])**2 ))
-                                #   save the intersection point position
-                                intersection_points.append(intersection_point)
-                                
-                        #   find the minimum distance and its index in the list
-                        particles_distance , intersection_index = min( (i , j) for \
-                            (i , j) in enumerate(particle_distance_to_walls))
+            # prepare for move randomly again 
+            random_move_state = True
 
-                        #   TODO: nastaran plot this . this line is the particle sensor line
-                        #   particle sensor line [ start_point , end_point ]
-                        particle_sensor_line = [ [ particle[0] , particle[1] ] , intersection_points[intersection_index] ]
+            #++++++++++++++++++++ sensor update ++++++++++++++++++++++++++
 
-                        #   sensor model is a normal distribution [mean,var]
-                        #   mean is the distance that particles read 
-                        #   var is 0.000097
-                        weights[index] += stats.norm(particles_distance, 0.000097).pdf(last_laser_data)
-                    
-                    #   normalize the weights
-                    weights /= np.sum(weights)
-                    #-------------------------------------------------------------    
+            # wait for new laser data
+            new_laser_data_flag = False 
+            while not new_laser_data_flag:pass
+            last_laser_data = laser_data
 
-                    #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
-                    # 5 pointer stochastic universal sampling
-                    # 5 random position in wheel for initial pointer position
-                    pointers = np.random.rand(5)
-                    cum_wheel = np.cumsum(weights)
-                    indexes = np.zeros((particle_number, 1))
-                    i = 0
-                    while i < particle_number:
-                        # find index of particles which 5 pointers pointed
-                        for j in range(5):
-                            indexes[i] = np.where(pointers[j] <= cum_wheel)[0][0]
-                            i += 1
-                        # roll wheel
-                        pointers +=  np.random.rand(5)
-                        # move exceeded pointers to acceptable place
-                        pointers[np.where(pointers > 1)[0]] -= 1
-                        
-                    indexes = np.ravel(indexes)
-                    indexes = indexes.astype(int)
-                    # update particles and weights
-                    particles[:] = particles[indexes]
-                    weights = weights[indexes]
-                    #--------------------------------------------------------------
-            
+            #   do for all particles
+            for index , particle in enumerate(particles):
+
+                #   calculate the start and the end of sensor line (the lenth is 0.4)
+                #   [start_point , end_point]
+                sensor_line = [ [particle[0],particle[1]] , \
+                    [ 0.4*math.cos(particle[2]*math.pi/180)+particle[0] , \
+                        0.4*math.sin(particle[2]*math.pi/180)+particle[1] ] ]
+
+                #   distance of particle to all walls that faces it
+                particle_distance_to_walls = [] 
+                #   the  intersection point to all those walls
+                intersection_points = []
+
+                for line in all_map_lines:
+
+                    #   calculate the intersection point 
+                    intersection_point = map.intersection(line[0],line[1] , sensor_line[0],sensor_line[1])
+
+                    #   check for the existance of intersection point 
+                    if intersection_point :
+                        #   calculate the distance of intersection point and particle position
+                        particle_distance_to_walls.append( \
+                            math.sqrt( (particle[0]-intersection_point[0])**2 + (particle[1]-intersection_point[1])**2 ))
+                        #   save the intersection point position
+                        intersection_points.append(intersection_point)
+
+                #   find the minimum distance and its index in the list
+                particles_distance , intersection_index = min( (i , j) for \
+                    (i , j) in enumerate(particle_distance_to_walls))
+
+                #   TODO: nastaran plot this . this line is the particle sensor line
+                #   particle sensor line [ start_point , end_point ]
+                particle_sensor_line = [ [ particle[0] , particle[1] ] , intersection_points[intersection_index] ]
+
+                #   sensor model is a normal distribution [mean,var]
+                #   mean is the distance that particles read 
+                #   var is 0.000097
+                weights[index] += stats.norm(particles_distance, 0.000097).pdf(last_laser_data)
+
+            #   normalize the weights
+            weights /= np.sum(weights)
+            #-------------------------------------------------------------    
+
+            #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
+            # 5 pointer stochastic universal sampling
+            # 5 random position in wheel for initial pointer position
+            pointers = np.random.rand(5)
+            cum_wheel = np.cumsum(weights)
+            indexes = np.zeros((particle_number, 1))
+            i = 0
+            while i < particle_number:
+                # find index of particles which 5 pointers pointed
+                for j in range(5):
+                    indexes[i] = np.where(pointers[j] <= cum_wheel)[0][0]
+                    i += 1
+                # roll wheel
+                pointers +=  np.random.rand(5)
+                # move exceeded pointers to acceptable place
+                pointers[np.where(pointers > 1)[0]] -= 1
+
+            indexes = np.ravel(indexes)
+            indexes = indexes.astype(int)
+            # update particles and weights
+            particles[:] = particles[indexes]
+            weights = weights[indexes]
+            #--------------------------------------------------------------
+
             
  
         pub.publish(speed)
