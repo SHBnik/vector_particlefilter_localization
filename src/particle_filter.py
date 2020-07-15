@@ -47,7 +47,7 @@ y_limit = 1
 laser_range = 0.04
 
 home = expanduser("~")
-map_address = home + '/catkin_w3/src/anki_description/world/sample2.world'
+map_address = home + '/catkin_ws/src/anki_description/world/sample2.world'
 #------------------------------------------------------
 
 
@@ -182,7 +182,7 @@ while not rospy.is_shutdown():
 
             particles[:, 0] += np.cos(total_rotation) * total_transition
             particles[:, 1] += np.sin(total_rotation) * total_transition
-            particles[:, 2] = total_rotation
+            particles[:, 2] += total_rotation
             #------------------------------------------------------------
 
             # prepare for move randomly again 
@@ -221,8 +221,7 @@ while not rospy.is_shutdown():
                             collission_line = line
                         
                 print(collission_line)
-                if collission_line:                 
-                    #   TODO: nastaran plot this . this line is the particle sensor line
+                if collission_line:
                     #   particle sensor line [ start_point , end_point ]
                     particle_sensor_line = [ [ particles[i][0] , particles[i][1] ], collission_line ]
 
@@ -232,8 +231,8 @@ while not rospy.is_shutdown():
                     weights[i] += stats.norm(min_distance, 0.000097).pdf(last_laser_data)
                 
             for particle in particles:
-                plt.arrow(particle[0], particle[1], 0.0001*math.cos(particle[2]), \
-                    0.0001*math.sin(particle[2]), head_width = 0.02)
+                plt.arrow(particle[0], particle[1], 0.00001*math.cos(particle[2]), \
+                    0.00001*math.sin(particle[2]), head_width = 0.02, fill=False, overhang = 0.6)
             plt.show()
 
             #   normalize the weights
