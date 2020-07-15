@@ -13,6 +13,7 @@ from std_srvs.srv import Empty
 import scipy.stats as stats
 from os.path import expanduser
 import map
+import matplotlib.pyplot as plt
 
 
 #+++++++++++++++++++++ init vars ++++++++++++++++++++
@@ -104,7 +105,7 @@ all_map_lines = map.convert_point_to_line(rects) #  TODO: nastaran you can plot 
 particles = np.empty((particle_number, 3))
 particles[:, 0] = uniform(-1, 1, size=particle_number)
 particles[:, 1] = uniform(-1, 1, size=particle_number)
-particles[:, 2] = random.choice([-90,90,180,0], size=particle_number)
+particles[:, 2] = np.random.choice([-90,90,180,0], size=particle_number)
 
 weights = np.array([1.0]*particle_number)/particle_number
 #---------------------------------------------------------
