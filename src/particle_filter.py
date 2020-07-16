@@ -36,9 +36,7 @@ r_max_p_term = 0.3
 laser_data = 0
 new_laser_data_flag = False
 
-distance_threshold = 0.33
-
-particle_number = 20
+particle_number = 10
 
 laser_range = 0.04
 
@@ -49,6 +47,11 @@ map_address = home + '/catkin_ws/src/anki_description/world/sample4.world'
 
 # interactive plot
 plt.ion()
+# reverse y axis
+plt.gca().invert_yaxis()
+
+
+pointers = np.random.rand(5)
 #------------------------------------------------------
 
 
@@ -101,7 +104,7 @@ rects,global_map_pose = map.init_map(map_address)
 all_map_lines = map.convert_point_to_line(rects)
 #   the center position of the map [x,y]
 global_map_position = [float(global_map_pose[0]),float(global_map_pose[1])]
-all_map_lines = map.add_offset(all_map_lines,global_map_position)
+all_map_lines = map.add_offset(all_map_lines, global_map_position)
 #--------------------------------------------------------
 
 #+++++++++++++++++ init particles +++++++++++++++++++++++
@@ -122,7 +125,7 @@ while not rospy.is_shutdown():
         #   choose a random move for vector 
         #   which is acceptable for map
         yaw_setpoint = random.choice([-90,90,180,0])
-        r_setpoint = random.choice([0.2,0.3]) # delete 0.5
+        r_setpoint = random.choice([0.2,0.3, 0.5])
         
         print 'target = ', r_setpoint, yaw_setpoint
 
@@ -158,10 +161,10 @@ while not rospy.is_shutdown():
                     while not new_laser_data_flag:pass
                     last_laser_data = laser_data
                 
-                    print('laser data after the rotation of vector',last_laser_data)
+                    print 'laser data after the rotation of vector',last_laser_data 
                 
                 # validate the distance to wall if less than the threshold dont apply the transistion
-                if last_laser_data > distance_threshold:
+                if last_laser_data > r_setpoint + 0.03:
                     # save the first place location 
                     if get_last_loc_flag :
                         last_x = x
@@ -195,7 +198,7 @@ while not rospy.is_shutdown():
             total_rotation = e_rot_in_rot + e_trans_in_rot
 
             total_transition = 0
-            if last_laser_data > distance_threshold:
+            if last_laser_data > r_setpoint + 0.03:
                 e_trans_in_trans = np.random.normal(0.99*r_setpoint + 0.0034, 0.0027, particle_number)
                 e_rot_in_trans = np.random.normal(0.0125, 0.0007, particle_number)
                 total_transition = e_trans_in_trans + e_rot_in_trans
@@ -206,7 +209,7 @@ while not rospy.is_shutdown():
             #-------------------------------------------------------------
 
             #++++++++++++++++++++ sensor update ++++++++++++++++++++++++++
-            weights = np.array([0.5]*particle_number)
+            weights = np.array([0.000001]*particle_number)
             
             plt.clf()
             # plot map
@@ -223,15 +226,16 @@ while not rospy.is_shutdown():
                 #   calculate the start and the end of sensor line (the length is 0.4)
                 #   [start_point , end_point]
                 sensor_line = [ [particles[i][0], particles[i][1]] , \
-                    [ 0.4*math.cos(particles[i][2]*math.pi/180)+particles[i][0] , \
-                    0.4*math.sin(particles[i][2]*math.pi/180)+particles[i][1] ] ]
+                    [ 0.4*math.cos(particles[i][2]*math.pi/180.0)+particles[i][0] , \
+                    0.4*math.sin(particles[i][2]*math.pi/180.0)+particles[i][1] ] ]
+                #plt.plot( [sensor_line[0][1], sensor_line[1][1]] , [sensor_line[0][0], sensor_line[1][0]])
                 
                 min_distance = 10
                 collission_point = False
                 
                 for line in all_map_lines:
                     #   calculate the intersection point
-                    intersection_point = map.intersection(line[0], line[1] , sensor_line[0], sensor_line[1])
+                    intersection_point = map.find_intersection(line[0], line[1] , sensor_line[0], sensor_line[1])
 
                     #   check for the existance of intersection point 
                     if intersection_point != False:
@@ -262,24 +266,24 @@ while not rospy.is_shutdown():
             # plot robot position
             plt.arrow(y, x, 0.00001*math.sin(theta), 0.00001*math.cos(theta), \
                 color = 'red', head_width = 0.02, overhang = 0.6)
-            print 'robot position=', x, y
+            print 'robot position=', x, y, theta*math.pi/180
             
             #   plotting every particle position and orientation
             for particle in particles:
-                print 'particle position = ', particle[0], particle[1]
-                plt.arrow(particle[1], particle[0], 0.00001*math.sin(particle[2]*math.pi/180), \
-                    0.00001*math.cos(particle[2]*math.pi/180), head_width = 0.02, fill=False, overhang = 0.6)
+                #print 'particle position = ', particle[0], particle[1]
+                plt.arrow(particle[1], particle[0], 0.00001*math.sin(particle[2]*math.pi/180.0), \
+                    0.00001*math.cos(particle[2]*math.pi/180.0), head_width = 0.02, fill=False, overhang = 0.6)
             plt.draw()
             plt.pause(0.5)
 
             #   normalize the weights
             weights /= np.sum(weights)
+            print(weights)
             #-------------------------------------------------------------    
 
             #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
             # 5 pointer stochastic universal sampling
             # 5 random position in wheel for initial pointer position
-            pointers = np.random.rand(5)
             cum_wheel = np.cumsum(weights)
             indexes = np.zeros((particle_number, 1))
             i = 0
@@ -295,8 +299,9 @@ while not rospy.is_shutdown():
 
             indexes = np.ravel(indexes)
             indexes = indexes.astype(int)
+            print(indexes)
             # update particles and weights
-            particles[:] = particles[indexes]
+            particles = particles[indexes]
             weights = weights[indexes]
             #--------------------------------------------------------------
             
