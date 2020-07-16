@@ -68,7 +68,7 @@ def init_map(address):
     return rects,global_map_pose
 
 
-def intersection(p1,p2,p3,p4):
+def find_intersection(p1,p2,p3,p4):
 
     line1 = LineString([tuple(p1), tuple(p2)])
     line2 = LineString([tuple(p3), tuple(p4)])
