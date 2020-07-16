@@ -32,17 +32,13 @@ yaw_setpoint = 0
 r_setpoint = 0
 r_max_p_term = 0.3
 
-map_address = ''
 
 laser_data = 0
 new_laser_data_flag = False
 
-distance_threshold = 0.26
+distance_threshold = 0.33
 
 particle_number = 10
-
-x_limit = 1
-y_limit = 1
 
 laser_range = 0.04
 
@@ -50,6 +46,9 @@ loop_iter = 0
 
 home = expanduser("~")
 map_address = home + '/catkin_ws/src/anki_description/world/sample4.world'
+
+# interactive plot
+plt.ion()
 #------------------------------------------------------
 
 
@@ -103,7 +102,6 @@ all_map_lines = map.convert_point_to_line(rects)
 #   the center position of the map [x,y]
 global_map_position = [float(global_map_pose[0]),float(global_map_pose[1])]
 all_map_lines = map.add_offset(all_map_lines,global_map_position)
-map.plot_map(all_map_lines)
 #--------------------------------------------------------
 
 #+++++++++++++++++ init particles +++++++++++++++++++++++
@@ -124,7 +122,7 @@ while not rospy.is_shutdown():
         #   choose a random move for vector 
         #   which is acceptable for map
         yaw_setpoint = random.choice([-90,90,180,0])
-        r_setpoint = random.choice([0.2,0.3,0.5])
+        r_setpoint = random.choice([0.2,0.3]) # delete 0.5
         
         print 'target = ', r_setpoint, yaw_setpoint
 
@@ -149,6 +147,8 @@ while not rospy.is_shutdown():
                 #   stop the rotation
                 speed.angular.z = 0
                 pub.publish(speed)
+                
+                time.sleep(0.5)
 
                 #   just do it once
                 loop_iter += 1
@@ -206,7 +206,11 @@ while not rospy.is_shutdown():
             #-------------------------------------------------------------
 
             #++++++++++++++++++++ sensor update ++++++++++++++++++++++++++
-            weights = np.array([0.0001]*particle_number)
+            weights = np.array([0.5]*particle_number)
+            
+            plt.clf()
+            # plot map
+            map.plot_map(all_map_lines)
             
             # wait for new laser data
             new_laser_data_flag = False 
@@ -236,12 +240,12 @@ while not rospy.is_shutdown():
                         if min_distance >= distance:
                             min_distance = distance
                             collission_point = intersection_point
-                        
-                print(collission_point)
 
                 #   sensor hit situation
                 if collission_point != False:
                     #   particle sensor line [ start_point , end_point ]
+                    plt.plot( [particles[i][1], collission_point[1]], [particles[i][0], collission_point[0]] ,\
+                        color='blue', linestyle=':')
                     particle_sensor_line = [ [ particles[i][0] , particles[i][1] ], collission_point ]
                 #   sensor max situation
                 else:
@@ -254,11 +258,19 @@ while not rospy.is_shutdown():
                 #   var is 0.000097
                 weights[i] += stats.norm(min_distance, 0.000097).pdf(last_laser_data)
                 
+            
+            # plot robot position
+            plt.arrow(y, x, 0.00001*math.sin(theta), 0.00001*math.cos(theta), \
+                color = 'red', head_width = 0.02, overhang = 0.6)
+            print 'robot position=', x, y
+            
             #   plotting every particle position and orientation
             for particle in particles:
-                plt.arrow(particle[0], particle[1], 0.00001*math.cos(particle[2]), \
-                    0.00001*math.sin(particle[2]), head_width = 0.02, fill=False, overhang = 0.6)
-            plt.show()
+                print 'particle position = ', particle[0], particle[1]
+                plt.arrow(particle[1], particle[0], 0.00001*math.sin(particle[2]), \
+                    0.00001*math.cos(particle[2]), head_width = 0.02, fill=False, overhang = 0.6)
+            plt.draw()
+            plt.pause(0.5)
 
             #   normalize the weights
             weights /= np.sum(weights)
