@@ -38,7 +38,7 @@ new_laser_data_flag = False
 
 distance_threshold = 0.33
 
-particle_number = 10
+particle_number = 20
 
 laser_range = 0.04
 
@@ -267,8 +267,8 @@ while not rospy.is_shutdown():
             #   plotting every particle position and orientation
             for particle in particles:
                 print 'particle position = ', particle[0], particle[1]
-                plt.arrow(particle[1], particle[0], 0.00001*math.sin(particle[2]), \
-                    0.00001*math.cos(particle[2]), head_width = 0.02, fill=False, overhang = 0.6)
+                plt.arrow(particle[1], particle[0], 0.00001*math.sin(particle[2]*math.pi/180), \
+                    0.00001*math.cos(particle[2]*math.pi/180), head_width = 0.02, fill=False, overhang = 0.6)
             plt.draw()
             plt.pause(0.5)
 
