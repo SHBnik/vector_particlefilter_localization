@@ -107,5 +107,5 @@ def add_offset(lines,offset):
 def plot_map(rects):
     for rect in rects:
         rect = list(zip(*rect))
-        plt.plot(rect[0], rect[1], c='black')
+        plt.plot(rect[1], rect[0], c='black')
 
