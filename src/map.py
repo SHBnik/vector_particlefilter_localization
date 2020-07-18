@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
 import math
 import shapely
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString,Point, Polygon
 
 
 
@@ -91,21 +91,46 @@ def convert_point_to_line(rects):
     return lines
 
 
-def add_offset(lines,offset):
-    new_lines = []
-    for line in lines: 
-        new_lines.append(
+def add_offset(rects,offset):
+    new_rects = []
+    for points in rects: 
+        new_rects.append(
             [  
-                [line[0][0] + offset[0] , line[0][1] + offset[1]  ] ,
-                [line[1][0] + offset[0] , line[1][1] + offset[1]  ]
+                [points[0][0] + offset[0] , points[0][1] + offset[1]  ] ,
+                [points[1][0] + offset[0] , points[1][1] + offset[1]  ] ,
+                [points[2][0] + offset[0] , points[2][1] + offset[1]  ] ,
+                [points[3][0] + offset[0] , points[3][1] + offset[1]  ] 
             ]
         )
-    return new_lines
+    return new_rects
 
+
+def convert_to_poly(rects):
+    polygons = []
+    for points in rects:
+        polygons.append(Polygon(
+            [tuple(points[0]) ,
+            tuple(points[1]),
+            tuple(points[3]),
+            tuple(points[2])
+            ]))
+    return polygons
+
+def check_is_collition(point , rects):
+    p = Point(tuple(point))
+    for rect in rects:
+        if rect.contains(p):
+            return True
+    return False
 
 
 def plot_map(rects):
     for rect in rects:
         rect = list(zip(*rect))
         plt.plot(rect[1], rect[0], c='black')
+
+
+
+
+
 

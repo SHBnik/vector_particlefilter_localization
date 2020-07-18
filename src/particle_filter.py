@@ -12,8 +12,8 @@ from geometry_msgs.msg import Twist
 from std_srvs.srv import Empty
 import scipy.stats as stats
 from os.path import expanduser
-import map
 import matplotlib.pyplot as plt
+import map
 
 
 #+++++++++++++++++++++ init vars ++++++++++++++++++++
@@ -30,13 +30,13 @@ get_last_loc_flag = True
 random_move_state = True
 yaw_setpoint = 0
 r_setpoint = 0
-r_max_p_term = 0.3
+r_max_p_term = 0.1
 
 
 laser_data = 0
 new_laser_data_flag = False
 
-particle_number = 2
+particle_number = 1
 
 laser_range = 0.04
 
@@ -56,7 +56,6 @@ def laser_reader(msg):
 
     new_laser_data_flag = True
     laser_data = msg.range
-
 #------------------------------------------------------
  
 
@@ -73,6 +72,7 @@ def new_odometry(msg):
  
     rot_q = msg.pose.pose.orientation
     (roll, pitch, theta) = euler_from_quaternion([rot_q.x, rot_q.y, rot_q.z, rot_q.w])
+    # theta += 90*math.pi/180.0
 
 #------------------------------------------------------
 
@@ -94,18 +94,42 @@ speed = Twist()
 #+++++++++++++++++++++ MAP ++++++++++++++++++++++++++++++
 #   convert the 3d map to 2d map and get all points of every rectangle
 rects,global_map_pose = map.init_map(map_address)
-#   get the lines of every rectangle line defined by [start_point , end_point]
-all_map_lines = map.convert_point_to_line(rects)
 #   the center position of the map [x,y]
 global_map_position = [float(global_map_pose[0]),float(global_map_pose[1])]
-all_map_lines = map.add_offset(all_map_lines, global_map_position)
+
+rects = map.add_offset(rects,global_map_position)
+#   get the lines of every rectangle line defined by [start_point , end_point]
+all_map_lines = map.convert_point_to_line(rects)
+
+polygan = map.convert_to_poly(rects)
+
 #--------------------------------------------------------
 
 #+++++++++++++++++ init particles +++++++++++++++++++++++
-particles = np.empty((particle_number, 3))
+particles = np.empty((particle_number, 4))
 particles[:, 0] = uniform(-0.5, 0.5, size=particle_number) + global_map_position[0]
 particles[:, 1] = uniform(-0.5, 0.5, size=particle_number) + global_map_position[1]
-particles[:, 2] = np.random.choice([-90,90,180,0], size=particle_number)*math.pi/180.0
+particles[:, 2] = uniform(-180, 180, size=particle_number)*math.pi/180.0
+
+
+for i in range(particle_number):
+    while map.check_is_collition([particles[i][0],particles[i][1]] , polygan):
+        # resample
+        print('resample')
+        particles[i][0] = uniform(-0.5, 0.5) + global_map_position[0]
+        particles[i][1] = uniform(-0.5, 0.5) + global_map_position[1]
+
+
+
+# map.plot_map(all_map_lines)
+# for i, particle in enumerate(particles):
+#     # print 'particle position = ', particle[0], particle[1], particle[2]*180.0/math.pi
+#     plt.text(particle[1]+0.01, particle[0]+0.01, '{}'.format(i))
+#     plt.arrow(particle[1], particle[0], 0.00001*math.sin(particle[2]), \
+#         0.00001*math.cos(particle[2]), head_width = 0.02, fill=False, overhang = 0.6)
+
+# plt.show()
+# time.sleep(10)
 #---------------------------------------------------------
 
 while not rospy.is_shutdown():
@@ -115,8 +139,11 @@ while not rospy.is_shutdown():
         #   choose a random move for vector 
         #   which is acceptable for map
         yaw_setpoint = random.choice([-90,90,180,0])
-        r_setpoint = random.choice([0.2,0.3, 0.5])
-        
+        def_rot = yaw_setpoint - theta
+        # r_setpoint = random.choice([0.2,0.3, 0.5])
+        # yaw_setpoint = uniform(-180, 180)
+        r_setpoint = uniform(0,0.35)
+
         print 'target = ', r_setpoint, yaw_setpoint
 
         yaw_setpoint = yaw_setpoint * math.pi / 180.0
@@ -134,7 +161,11 @@ while not rospy.is_shutdown():
             #   calculte the yaw error
             yaw_error = yaw_setpoint - theta
             # move yaw
-            speed.angular.z = yaw_error * 10
+            yaw_p_term = yaw_error * 10
+            if yaw_p_term > 1.57 :   
+                yaw_p_term = 1.57
+            speed.angular.z = yaw_p_term
+            
             if yaw_error < 0.01 and yaw_error > -0.01:
                 
                 #   stop the rotation
@@ -150,11 +181,10 @@ while not rospy.is_shutdown():
                     new_laser_data_flag = False 
                     while not new_laser_data_flag:pass
                     last_laser_data = laser_data
-                
                     print 'laser data after the rotation of vector',last_laser_data 
                 
                 # validate the distance to wall if less than the threshold dont apply the transistion
-                if last_laser_data > r_setpoint + 0.03:
+                if last_laser_data > r_setpoint + 0.3:
                     # save the first place location 
                     if get_last_loc_flag :
                         last_x = x
@@ -175,6 +205,9 @@ while not rospy.is_shutdown():
                         get_last_loc_flag = True
                         robot_movment_complite_flag = True
                 
+                    #   particle.update()
+                    #   particle .resample()
+                    #   map.plot()
                 else:
                     robot_movment_complite_flag = True
                     
@@ -182,13 +215,14 @@ while not rospy.is_shutdown():
         #++++++++++++++++++++ predict (move) particles ++++++++++++++
         #   if the robot in gazebo stoped then do rest of things
         else:
+            print('move particle')
 
             e_rot_in_rot = np.random.normal(0.9957*yaw_setpoint + 0.0768, 0.0005, particle_number)
             e_trans_in_rot = np.random.normal(0.1021, 0.0015, particle_number)
             total_rotation = e_rot_in_rot
 
             total_transition = 0
-            if last_laser_data > r_setpoint + 0.03:
+            if last_laser_data > r_setpoint + 0.3:
                 e_trans_in_trans = np.random.normal(0.99*r_setpoint + 0.0034, 0.0027, particle_number)
                 e_rot_in_trans = np.random.normal(0.0125, 0.0007, particle_number)
                 total_transition = e_trans_in_trans + e_rot_in_trans
@@ -196,25 +230,29 @@ while not rospy.is_shutdown():
 
             particles[:, 0] += np.cos(total_rotation) * total_transition
             particles[:, 1] += np.sin(total_rotation) * total_transition
-            particles[:, 2] += yaw_setpoint ####TODO:shahab check it.
+            particles[:, 2] += def_rot
             #-------------------------------------------------------------
 
             #++++++++++++++++++++ sensor update ++++++++++++++++++++++++++
-            weights = np.array([0.00000000001]*particle_number)
+            print("in sensor update")
+            weights = np.zeros(particle_number)
             
             plt.clf()
             # reverse y axis
             plt.gca().invert_yaxis()
             # plot map
             map.plot_map(all_map_lines)
+            print('map ploted')
             
             # wait for new laser data
             new_laser_data_flag = False 
             while not new_laser_data_flag:pass
             last_laser_data = laser_data
+            print('new laser data',last_laser_data)
 
             #   do for all particles
             for i in range(particle_number):
+                print('particle',i)
 
                 #   calculate the start and the end of sensor line (the length is 0.4)
                 #   [start_point , end_point]
@@ -250,13 +288,15 @@ while not rospy.is_shutdown():
                     particle_sensor_line = sensor_line
                     min_distance = 0.4
 
+                print(min_distance)
                 #   sensor model is a normal distribution [mean,var]
                 #   mean is the distance that particles read 
                 #   var is 0.000097
                 # print min_distance, stats.norm(min_distance, 0.0097).pdf(last_laser_data)
-                weights[i] += stats.norm(min_distance, 0.0097).pdf(last_laser_data)
+                weights[i] = stats.norm(min_distance, 0.0097).pdf(last_laser_data)
                 
             #   plotting every particle position and orientation
+            print('plot particle lasers')
             for i, particle in enumerate(particles):
                 # print 'particle position = ', particle[0], particle[1], particle[2]*180.0/math.pi
                 plt.text(particle[1]+0.01, particle[0]+0.01, '{}'.format(i))
@@ -273,7 +313,6 @@ while not rospy.is_shutdown():
             weights /= np.sum(weights)
             
             print weights
-            
             # if you want to plot episodic change 
             # plt.draw() to plt.show()            
             plt.draw()
@@ -281,32 +320,35 @@ while not rospy.is_shutdown():
             #-------------------------------------------------------------    
 
             #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
-            '''
-            indexes = []
-            index = np.random.randint(particle_number)
-            beta = 0.0
-            max_weight = max(weights)
-            for i in range(particle_number/2):
-                beta += np.random.rand() *2.0*max_weight
-                while beta > weights[index]:
-                    beta -= weights[index]
-                    index = (index + 1) % particle_number
-                indexes.append(index)
-            indexes = np.array(indexes)
-            '''
+            print('resample')
+           
             
-            indexes = np.random.choice(particle_number, size=particle_number/2, p=weights)
-            print 'selected index =', indexes, 'weight =', weights[indexes]
+            # indexes = []
+            # index = np.random.randint(particle_number)
+            # beta = 0.0
+            # max_weight = max(weights)
+            # for i in range(particle_number/2):
+            #     beta += np.random.rand() *2.0*max_weight
+            #     while beta > weights[index]:
+            #         beta -= weights[index]
+            #         index = (index + 1) % particle_number
+            #     indexes.append(index)
+            # indexes = np.array(indexes)
             
-            # random resampling
-            random_particles = np.empty((particle_number/2, 3))
-            random_particles[:, 0] = uniform(-0.5, 0.5, size=particle_number/2) + global_map_position[0]
-            random_particles[:, 1] = uniform(-0.5, 0.5, size=particle_number/2) + global_map_position[1]
-            random_particles[:, 2] = np.random.choice([-90,90,180,0], size=particle_number/2)*math.pi/180.0
+            
+            
+            # indexes = np.random.choice(particle_number, size=particle_number/2, p=weights)
+            # print 'selected index =', indexes, 'weight =', weights[indexes]
+            
+            # # random resampling
+            # random_particles = np.empty((particle_number/2, 3))
+            # random_particles[:, 0] = uniform(-0.5, 0.5, size=particle_number/2) + global_map_position[0]
+            # random_particles[:, 1] = uniform(-0.5, 0.5, size=particle_number/2) + global_map_position[1]
+            # random_particles[:, 2] = uniform(-180, 180, size=particle_number/2)*math.pi/180.0
 
             
-            # update particles
-            particles = np.concatenate((particles[indexes], random_particles))
+            # # update particles
+            # particles = np.concatenate((particles[indexes], random_particles))
             #particles = particles[indexes]
             #--------------------------------------------------------------
             
