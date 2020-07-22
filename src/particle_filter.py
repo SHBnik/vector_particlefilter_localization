@@ -36,7 +36,7 @@ r_max_p_term = 0.1
 laser_data = 0
 new_laser_data_flag = False
 
-particle_number = 50
+particle_number = 200
 
 laser_range = 0.04
 
@@ -58,10 +58,8 @@ def laser_reader(msg):
     laser_data = msg.range
 #------------------------------------------------------
  
-
-
-#++++++++++++ read new pose from the gazebo world +++++++
-
+        # yaw_setpoint = uniform(-180, 180)
+        #r_setpoint = uniform(0,0.35)
 def new_odometry(msg):
     global x
     global y
@@ -124,15 +122,6 @@ for i in range(particle_number):
 
 
 
-# map.plot_map(all_map_lines)
-# for i, particle in enumerate(particles):
-#     # print 'particle position = ', particle[0], particle[1], particle[2]*180.0/math.pi
-#     plt.text(particle[1]+0.01, particle[0]+0.01, '{}'.format(i))
-#     plt.arrow(particle[1], particle[0], 0.00001*math.sin(particle[2]), \
-#         0.00001*math.cos(particle[2]), head_width = 0.02, fill=False, overhang = 0.6)
-
-# plt.show()
-# time.sleep(10)
 #---------------------------------------------------------
 
 while not rospy.is_shutdown():
@@ -144,8 +133,7 @@ while not rospy.is_shutdown():
         yaw_setpoint = random.choice([-90,90,180,0])
         
         r_setpoint = random.choice([0, 0.2, 0.3])
-        # yaw_setpoint = uniform(-180, 180)
-        #r_setpoint = uniform(0,0.35)
+
 
         print 'target = ', r_setpoint, yaw_setpoint
 
@@ -283,12 +271,12 @@ while not rospy.is_shutdown():
                     particle_sensor_line = sensor_line
                     min_distance = 0.4
 
-                # print(min_distance)
+
                 #   sensor model is a normal distribution [mean,var]
                 #   mean is the distance that particles read 
                 #   var is 0.000097
                 print i, min_distance
-                weights[i] += stats.norm(min_distance, 0.0097).pdf(last_laser_data)
+                weights[i] = stats.norm(min_distance, 0.0097).pdf(last_laser_data)
                 
             print weights
             #   plotting every particle position and orientation
@@ -305,8 +293,9 @@ while not rospy.is_shutdown():
             # print 'robot position=', x, y, theta*math.pi/180
 
             #   normalize the weights
-            weights /= np.sum(weights)
-            
+            print np.sum(weights)
+            weights /= weights.sum()
+
             # if you want to plot episodic change 
             # plt.draw() to plt.show()
             plt.draw()
@@ -314,19 +303,51 @@ while not rospy.is_shutdown():
             #-------------------------------------------------------------    
 
             #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
-            
-            indices = (-weights).argsort()[:int(0.8 * particle_number)]
-            indexes = np.random.choice(indices, indices, p=weights[indices])
+            print np.sum(weights)
+
+
+            indices_of_most_valuable_particles = (-weights).argsort()[:int(0.4 * particle_number)]
+            # indexes = np.random.choice(indices, indices, p=weights[indices])
             
             # random resampling
-            random_size = particle_number - len(indexes)
-            random_particles = np.empty((random_size, 3))
-            random_particles[:, 0] = uniform(-0.5, 0.5, size=random_size) + global_map_position[0]
-            random_particles[:, 1] = uniform(-0.5, 0.5, size=random_size) + global_map_position[1]
-            random_particles[:, 2] = np.random.choice([-90, 90, 180, 0], size=random_size)*math.pi/180.0
+            
+            random_size = particle_number - len(indices_of_most_valuable_particles)
+            
+            most_valuable_particles = particles[indices_of_most_valuable_particles]
+            random_particles_around_most_valuables = np.empty((int(0.75*random_size), 3))
+            random_particles_kidnapping = np.empty(((random_size - int(0.75*random_size)), 3))
+            
+
+            random_particles_kidnapping[:, 0] = uniform(-0.5, 0.5, size=(random_size - int(0.75*random_size))) + global_map_position[0]
+            random_particles_kidnapping[:, 1] = uniform(-0.5, 0.5, size=(random_size - int(0.75*random_size))) + global_map_position[1]
+            random_particles_kidnapping[:, 2] = np.random.choice([-90, 90, 180, 0], size=(random_size - int(0.75*random_size)))*math.pi/180.0
+
+            for i in range(len(random_particles_kidnapping)):
+                while map.check_is_collition([random_particles_kidnapping[i][0],random_particles_kidnapping[i][1]] , polygan):
+                    # resample
+                    random_particles_kidnapping[i][0] = uniform(-0.5, 0.5) + global_map_position[0]
+                    random_particles_kidnapping[i][1] = uniform(-0.5, 0.5) + global_map_position[1]
+
+            
+            indices_of_random_valuable_particles = np.random.choice(most_valuable_particles.shape[0], int(0.75*random_size))  
+            
+            random_particles_around_most_valuables[:, 0] = uniform(-0.03, 0.03, size=(int(0.75*random_size))) 
+                # + most_valuable_particles[indices_of_random_valuable_particles][0]
+            random_particles_around_most_valuables[:, 1] = uniform(-0.03, 0.03, size=(int(0.75*random_size))) 
+                # + most_valuable_particles[indices_of_random_valuable_particles][1]
+            random_particles_around_most_valuables[:, 2] = 0#most_valuable_particles[indices_of_random_valuable_particles][2]
+
+            random_particles_around_most_valuables += most_valuable_particles[indices_of_random_valuable_particles]
+
+            # for i in range(random_particles_around_most_valuables):
+            #     while map.check_is_collition([random_particles_around_most_valuables[i][0],random_particles_around_most_valuables[i][1]] , polygan):
+            #         # resample
+            #         random_particles_around_most_valuables[i][0] = uniform(-0.5, 0.5) + global_map_position[0]
+            #         random_particles_around_most_valuables[i][1] = uniform(-0.5, 0.5) + global_map_position[1]
+
 
             # update particles
-            particles = np.concatenate((particles[indexes], random_particles))
+            particles = np.concatenate((most_valuable_particles, random_particles_kidnapping, random_particles_around_most_valuables))
             # particles = particles[indexes]
             #--------------------------------------------------------------
             
