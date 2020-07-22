@@ -123,6 +123,13 @@ def check_is_collition(point , rects):
             return True
     return False
 
+def out_of_range(particle,offset):
+    if particle[0] - offset[0] > 0.5 or particle[0] - offset[0] < -0.5:
+        return True
+    elif particle[1] - offset[1] > 0.5 or particle[1] - offset[1] < -0.5:
+        return True
+    else:
+        return False
 
 def plot_map(rects):
     for rect in rects:
