@@ -307,10 +307,6 @@ while not rospy.is_shutdown():
             print np.sum(weights)
             weights /= weights.sum()
 
-            # if you want to plot episodic change 
-            # plt.draw() to plt.show()
-            plt.draw()
-            plt.pause(0.5)
             #-------------------------------------------------------------    
 
             #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
@@ -319,6 +315,16 @@ while not rospy.is_shutdown():
 
             indices_of_most_valuable_particles = (-weights).argsort()[:int(0.2 * particle_number)]
             # indexes = np.random.choice(indices, indices, p=weights[indices])
+            
+            estimate = sum(particles[indices_of_most_valuable_particles] * \
+                np.tile(weights[indices_of_most_valuable_particles], (3, 1)).transpose())
+            plt.arrow(estimate[1], estimate[0], 0.00001*math.sin(estimate[2]), 0.00001*math.cos(estimate[2]), \
+                color = 'blue', head_width = 0.02, overhang = 0.6)
+            
+            # if you want to plot episodic change 
+            # plt.draw() to plt.show()
+            plt.draw()
+            plt.pause(0.2)
             
             # random resampling
             
