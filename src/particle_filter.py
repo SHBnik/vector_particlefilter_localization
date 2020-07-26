@@ -36,14 +36,14 @@ r_max_p_term = 0.1
 laser_data = 0
 new_laser_data_flag = False
 
-particle_number = 200
+particle_number = 2000
 
 laser_range = 0.04
 
 loop_iter = 0
 
 home = expanduser("~")
-map_address = home + '/catkin_ws/src/anki_description/world/sample4.world'
+map_address = home + '/catkin_ws/src/anki_description/world/final1.world'
 
 is_halt = False
 #------------------------------------------------------
@@ -95,7 +95,8 @@ speed = Twist()
 
 #+++++++++++++++++++++ MAP ++++++++++++++++++++++++++++++
 #   convert the 3d map to 2d map and get all points of every rectangle
-rects,global_map_pose = map.init_map(map_address)
+rects,global_map_pose,map_boundry = map.init_map(map_address)
+# print(map_boundry)
 #   the center position of the map [x,y]
 global_map_position = [float(global_map_pose[0]),float(global_map_pose[1])]
 
@@ -109,16 +110,16 @@ polygan = map.convert_to_poly(rects)
 
 #+++++++++++++++++ init particles +++++++++++++++++++++++
 particles = np.empty((particle_number, 3))
-particles[:, 0] = uniform(-0.5, 0.5, size=particle_number) + global_map_position[0]
-particles[:, 1] = uniform(-0.5, 0.5, size=particle_number) + global_map_position[1]
+particles[:, 0] = uniform(map_boundry[0], map_boundry[1], size=particle_number) + global_map_position[0]
+particles[:, 1] = uniform(map_boundry[2], map_boundry[3], size=particle_number) + global_map_position[1]
 particles[:, 2] = np.random.choice([-90, 90, 180, 0], size=particle_number)*math.pi/180.0
 
 
 for i in range(particle_number):
     while map.check_is_collition([particles[i][0],particles[i][1]] , polygan):
         # resample
-        particles[i][0] = uniform(-0.5, 0.5) + global_map_position[0]
-        particles[i][1] = uniform(-0.5, 0.5) + global_map_position[1]
+        particles[i][0] = uniform(map_boundry[0], map_boundry[1]) + global_map_position[0]
+        particles[i][1] = uniform(map_boundry[2], map_boundry[3]) + global_map_position[1]
 
 #---------------------------------------------------------
 
@@ -217,7 +218,7 @@ while not rospy.is_shutdown():
                 particles[:, 2] += total_rotation
 
                 for i in range(particle_number):
-                    if map.check_is_collition([particles[i][0],particles[i][1]] , polygan) or map.out_of_range(particles[i],global_map_position):
+                    if map.check_is_collition([particles[i][0],particles[i][1]] , polygan) or map.out_of_range(particles[i],global_map_position,map_boundry):
                         particles[i][0] = -10
 
                 #-------------------------------------------------------------
@@ -306,7 +307,7 @@ while not rospy.is_shutdown():
 
                 #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
                 
-                indices_of_most_valuable_particles = (-weights).argsort()[:int(0.2 * particle_number)]
+                indices_of_most_valuable_particles = (-weights).argsort()[:int(0.4 * particle_number)]
                 # indexes = np.random.choice(indices, indices, p=weights[indices])
                 
                 estimate = particle_distance(particles[indices_of_most_valuable_particles])
@@ -328,7 +329,7 @@ while not rospy.is_shutdown():
                     break              
                 
                 random_size = particle_number - len(indices_of_most_valuable_particles)
-                random_around_valuable_size = int(0.5*random_size)
+                random_around_valuable_size = int(0.6*random_size)
 
 
                 most_valuable_particles = particles[indices_of_most_valuable_particles]
@@ -336,15 +337,15 @@ while not rospy.is_shutdown():
                 random_particles_kidnapping = np.empty(((random_size - random_around_valuable_size), 3))
                 
 
-                random_particles_kidnapping[:, 0] = uniform(-0.5, 0.5, size=(random_size - random_around_valuable_size)) + global_map_position[0]
-                random_particles_kidnapping[:, 1] = uniform(-0.5, 0.5, size=(random_size - random_around_valuable_size)) + global_map_position[1]
+                random_particles_kidnapping[:, 0] = uniform(map_boundry[0], map_boundry[1], size=(random_size - random_around_valuable_size)) + global_map_position[0]
+                random_particles_kidnapping[:, 1] = uniform(map_boundry[2], map_boundry[3], size=(random_size - random_around_valuable_size)) + global_map_position[1]
                 random_particles_kidnapping[:, 2] = np.random.choice([-90, 90, 180, 0], size=(random_size - random_around_valuable_size))*math.pi/180.0
 
                 for i in range(len(random_particles_kidnapping)):
                     while map.check_is_collition([random_particles_kidnapping[i][0],random_particles_kidnapping[i][1]] , polygan):
                         # resample
-                        random_particles_kidnapping[i][0] = uniform(-0.5, 0.5) + global_map_position[0]
-                        random_particles_kidnapping[i][1] = uniform(-0.5, 0.5) + global_map_position[1]
+                        random_particles_kidnapping[i][0] = uniform(map_boundry[0], map_boundry[1]) + global_map_position[0]
+                        random_particles_kidnapping[i][1] = uniform(map_boundry[2], map_boundry[3]) + global_map_position[1]
 
                 
                 indices_of_random_valuable_particles = np.random.choice(most_valuable_particles.shape[0], random_around_valuable_size)  

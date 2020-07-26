@@ -17,6 +17,7 @@ def init_map(address):
 
 
     rects = []
+    centers = []
 
     for links in root[0].iter('model'):
     
@@ -24,7 +25,13 @@ def init_map(address):
 
             for link in links: 
                 if link.tag == 'pose':
-                    global_map_pose = link.text.split(' ')
+                    _global_map_pose = link.text.split(' ')
+                    if _global_map_pose[0] != '0':
+                        global_map_pose = _global_map_pose
+                        print(global_map_pose) 
+                    
+
+            # for link in links: 
                 if link.tag == 'link':
 
                     geometry = None 
@@ -58,14 +65,15 @@ def init_map(address):
 
 
                     rects.append([p1 ,p2 ,p3 ,p4])
+                    centers.append([pose[0],pose[1]])
                 
                     # plt.plot([p1[0],p2[0],p4[0],p3[0],p1[0]],[p1[1],p2[1],p4[1],p3[1],p1[1]])
                     
         except Exception as e : pass
     
-
-    # plt.show()
-    return rects,global_map_pose
+    # print(global_map_pose)
+    
+    return rects,global_map_pose,map_boundry(centers)
 
 
 def find_intersection(p1,p2,p3,p4):
@@ -123,10 +131,24 @@ def check_is_collition(point , rects):
             return True
     return False
 
-def out_of_range(particle,offset):
-    if particle[0] - offset[0] > 0.5 or particle[0] - offset[0] < -0.5:
+
+def map_boundry(centers):
+    X = []
+    Y = [] 
+
+    for item in centers:
+        X.append(float(item[0]))
+        Y.append(float(item[1]))
+
+    return min(X),max(X),min(Y),max(Y)
+    
+
+
+
+def out_of_range(particle,offset,map_boundry):
+    if particle[0] - offset[0] > map_boundry[1] or particle[0] - offset[0] < map_boundry[0]:
         return True
-    elif particle[1] - offset[1] > 0.5 or particle[1] - offset[1] < -0.5:
+    elif particle[1] - offset[1] > map_boundry[3] or particle[1] - offset[1] < map_boundry[2]:
         return True
     else:
         return False
