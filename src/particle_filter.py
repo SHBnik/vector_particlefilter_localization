@@ -30,13 +30,13 @@ get_last_loc_flag = True
 random_move_state = True
 yaw_setpoint = 0
 r_setpoint = 0
-r_max_p_term = 0.1
+r_max_p_term = 0.5
 
 
 laser_data = 0
 new_laser_data_flag = False
 
-particle_number = 2000
+particle_number = 500
 
 laser_range = 0.04
 
@@ -178,7 +178,7 @@ while not rospy.is_shutdown():
                         get_last_loc_flag = False
                     # calculate the transition error 
                     r_error = r_setpoint - math.sqrt((x-last_x)**2 + (y-last_y)**2)
-                    r_p_term = r_error * 2
+                    r_p_term = r_error * 4
                     # limit the transition speed 
                     if r_p_term > r_max_p_term :   
                         r_p_term = r_max_p_term
@@ -218,7 +218,8 @@ while not rospy.is_shutdown():
                 particles[:, 2] += total_rotation
 
                 for i in range(particle_number):
-                    if map.check_is_collition([particles[i][0],particles[i][1]] , polygan) or map.out_of_range(particles[i],global_map_position,map_boundry):
+                    if map.check_is_collition([particles[i][0],particles[i][1]] , polygan) or \
+                  map.out_of_range(particles[i],global_map_position,map_boundry):
                         particles[i][0] = -10
 
                 #-------------------------------------------------------------
@@ -307,10 +308,62 @@ while not rospy.is_shutdown():
 
                 #+++++++++++++++++++++++ resample +++++++++++++++++++++++++++++
                 
-                indices_of_most_valuable_particles = (-weights).argsort()[:int(0.4 * particle_number)]
+                indices_of_most_valuable_particles = (-weights).argsort()[:int(0.3 * particle_number)]
                 # indexes = np.random.choice(indices, indices, p=weights[indices])
                 
                 estimate = particle_distance(particles[indices_of_most_valuable_particles])
+                plt.arrow(estimate[1], estimate[0], 0.00001*math.sin(estimate[2]), 0.00001*math.cos(estimate[2]), \
+                    color = 'blue', head_width = 0.02, overhang = 0.6)
+                
+                # if you want to plot episodic change 
+                # plt.draw() to plt.show()
+                plt.draw()
+                plt.pause(0.2)
+                
+                around_estimate_x = particles[np.where(abs(particles[:, 0] - estimate[0]) <= 0.05)]
+                around_estimate_y = around_estimate_x[np.where(abs(around_estimate_x[:, 1] - estimate[1]) <= 0.05)]
+                if len(around_estimate_y) >= 0.25*particle_number:
+                    plt.savefig('ending position.png')
+                    print 'estimate position =', estimate[0], estimate[1], estimate[2]*math.pi/180
+                    print 'robot position=', x, y, theta*math.pi/180
+                    is_halt = True
+                    break              
+                
+                random_size = particle_number - len(indices_of_most_valuable_particles)
+                random_around_valuable_size = int(0.5*random_size)
+
+                most_valuable_particles = particles[indices_of_most_valuable_particles]
+                random_particles_around_most_valuables = np.empty((random_around_valuable_size, 3))
+                random_particles_kidnapping = np.empty(((random_size - random_around_valuable_size), 3))
+                
+
+                random_particles_kidnapping[:, 0] = uniform(map_boundry[0], map_boundry[1], size= \
+                                                            (random_size - random_around_valuable_size)) + global_map_position[0]
+                random_particles_kidnapping[:, 1] = uniform(map_boundry[2], map_boundry[3], size= \
+                                                            (random_size - random_around_valuable_size)) + global_map_position[1]
+                random_particles_kidnapping[:, 2] = np.random.choice([-90, 90, 180, 0], size= \
+                                                                     (random_size - random_around_valuable_size))*math.pi/180.0
+
+                for i in range(len(random_particles_kidnapping)):
+                    while map.check_is_collition([random_particles_kidnapping[i][0],random_particles_kidnapping[i][1]] , polygan):
+                        # resample
+                        random_particles_kidnapping[i][0] = uniform(map_boundry[0], map_boundry[1]) + global_map_position[0]
+                        random_particles_kidnapping[i][1] = uniform(map_boundry[2], map_boundry[3]) + global_map_position[1]
+
+                
+                indices_of_random_valuable_particles = np.random.choice(most_valuable_particles.shape[0], random_around_valuable_size)  
+                
+                random_particles_around_most_valuables[:, 0] = uniform(-0.05, 0.05, size=(random_around_valuable_size)) 
+                random_particles_around_most_valuables[:, 1] = uniform(-0.05, 0.05, size=(random_around_valuable_size)) 
+                random_particles_around_most_valuables[:, 2] = 0
+
+                random_particles_around_most_valuables += most_valuable_particles[indices_of_random_valuable_particles]
+                
+                '''
+                # actual roulette wheel resampling with 20% random sampling
+                indexes = np.random.choice(particle_number, int(0.8*particle_number), p=weights)
+                
+                estimate = particle_distance(particles)
                 plt.arrow(estimate[1], estimate[0], 0.00001*math.sin(estimate[2]), 0.00001*math.cos(estimate[2]), \
                     color = 'blue', head_width = 0.02, overhang = 0.6)
                 
@@ -328,18 +381,12 @@ while not rospy.is_shutdown():
                     is_halt = True
                     break              
                 
-                random_size = particle_number - len(indices_of_most_valuable_particles)
-                random_around_valuable_size = int(0.6*random_size)
-
-
-                most_valuable_particles = particles[indices_of_most_valuable_particles]
-                random_particles_around_most_valuables = np.empty((random_around_valuable_size, 3))
-                random_particles_kidnapping = np.empty(((random_size - random_around_valuable_size), 3))
+                random_size = particle_number - int(0.8*particle_number)
+                random_particles_kidnapping = np.empty((random_size, 3))
                 
-
-                random_particles_kidnapping[:, 0] = uniform(map_boundry[0], map_boundry[1], size=(random_size - random_around_valuable_size)) + global_map_position[0]
-                random_particles_kidnapping[:, 1] = uniform(map_boundry[2], map_boundry[3], size=(random_size - random_around_valuable_size)) + global_map_position[1]
-                random_particles_kidnapping[:, 2] = np.random.choice([-90, 90, 180, 0], size=(random_size - random_around_valuable_size))*math.pi/180.0
+                random_particles_kidnapping[:, 0] = uniform(map_boundry[0], map_boundry[1], size=random_size) + global_map_position[0]
+                random_particles_kidnapping[:, 1] = uniform(map_boundry[2], map_boundry[3], size=random_size) + global_map_position[1]
+                random_particles_kidnapping[:, 2] = np.random.choice([-90, 90, 180, 0], size=random_size)*math.pi/180.0
 
                 for i in range(len(random_particles_kidnapping)):
                     while map.check_is_collition([random_particles_kidnapping[i][0],random_particles_kidnapping[i][1]] , polygan):
@@ -347,27 +394,11 @@ while not rospy.is_shutdown():
                         random_particles_kidnapping[i][0] = uniform(map_boundry[0], map_boundry[1]) + global_map_position[0]
                         random_particles_kidnapping[i][1] = uniform(map_boundry[2], map_boundry[3]) + global_map_position[1]
 
-                
-                indices_of_random_valuable_particles = np.random.choice(most_valuable_particles.shape[0], random_around_valuable_size)  
-                
-                random_particles_around_most_valuables[:, 0] = uniform(-0.06, 0.06, size=(random_around_valuable_size)) 
-                    # + most_valuable_particles[indices_of_random_valuable_particles][0]
-                random_particles_around_most_valuables[:, 1] = uniform(-0.06, 0.06, size=(random_around_valuable_size)) 
-                    # + most_valuable_particles[indices_of_random_valuable_particles][1]
-                random_particles_around_most_valuables[:, 2] = 0 #most_valuable_particles[indices_of_random_valuable_particles][2]
-
-                random_particles_around_most_valuables += most_valuable_particles[indices_of_random_valuable_particles]
-
-                # for i in range(random_particles_around_most_valuables):
-                #     while map.check_is_collition([random_particles_around_most_valuables[i][0],random_particles_around_most_valuables[i][1]] , polygan):
-                #         # resample
-                #         random_particles_around_most_valuables[i][0] = uniform(-0.5, 0.5) + global_map_position[0]
-                #         random_particles_around_most_valuables[i][1] = uniform(-0.5, 0.5) + global_map_position[1]
-
-
+                # update particles
+                particles = np.concatenate((particles[indexes], random_particles_kidnapping))
+                '''
                 # update particles
                 particles = np.concatenate((most_valuable_particles, random_particles_kidnapping, random_particles_around_most_valuables))
-                # particles = particles[indexes]
                 #--------------------------------------------------------------
                 
                 # prepare for move randomly again 
